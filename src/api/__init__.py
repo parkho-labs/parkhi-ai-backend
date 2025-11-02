@@ -1,0 +1,1 @@
+"""API layer - REST endpoints, WebSocket handlers, request validation."""

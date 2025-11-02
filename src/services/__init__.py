@@ -1,0 +1,1 @@
+"""Business logic layer - Video processing, AI orchestration, session management."""

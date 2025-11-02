@@ -1,0 +1,59 @@
+from functools import lru_cache
+from typing import Optional
+
+from pydantic import Field
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    api_host: str = Field(default="localhost", description="API host")
+    api_port: int = Field(default=8000, description="API port")
+    debug: bool = Field(default=False, description="Debug mode")
+    
+    database_url: str = Field(
+        default="sqlite:///./test.db",
+        description="PostgreSQL database URL",
+        examples=["postgresql://user:pass@localhost:5432/ai_video_tutor"]
+    )
+    db_host: str = Field(default="localhost", description="Database host")
+    db_port: int = Field(default=5432, description="Database port")
+    db_name: str = Field(default="ai_video_tutor", description="Database name")
+    db_user: str = Field(default="test_user", description="Database user")
+    db_password: str = Field(default="test_password", description="Database password")
+    
+    openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key")
+    anthropic_api_key: Optional[str] = Field(default=None, description="Anthropic API key")
+    google_api_key: Optional[str] = Field(default=None, description="Google API key")
+
+    firebase_service_account_path: str = Field(default="firebase-service-account.json", description="Firebase service account JSON file path")
+    firebase_project_id: str = Field(default="parkhoai-864b2", description="Firebase project ID")
+    firebase_web_client_id: str = Field(default="846780462763-41qfms7hjen9er8ak9j4n5cevc8pkoti.apps.googleusercontent.com", description="Firebase web client ID")
+    
+    max_video_length_minutes: int = Field(default=60, description="Maximum video length in minutes")
+    max_concurrent_jobs: int = Field(default=5, description="Maximum concurrent processing jobs")
+    job_timeout_minutes: int = Field(default=10, description="Job timeout in minutes")
+    temp_files_dir: str = Field(default="/tmp/ai_video_tutor", description="Temporary files directory")
+    
+    whisper_model: str = Field(default="base", description="Whisper model to use")
+    audio_chunk_duration_minutes: int = Field(default=10, description="Audio chunk duration in minutes")
+    
+    secret_key: str = Field(default="test_secret_key_change_in_production", description="Secret key for session management")
+    allowed_origins: list[str] = Field(
+        default=["http://localhost:3000", "http://localhost:3001", "http://localhost:5173"],
+        description="Allowed CORS origins"
+    )
+    
+    log_level: str = Field(default="INFO", description="Logging level")
+    log_format: str = Field(default="json", description="Log format (json or text)")
+    
+    rate_limit_per_minute: int = Field(default=10, description="Rate limit per minute")
+    rate_limit_per_hour: int = Field(default=100, description="Rate limit per hour")
+    
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        extra = "ignore"
+
+
+@lru_cache()
+def get_settings() -> Settings:
+    return Settings()

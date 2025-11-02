@@ -2,7 +2,7 @@ import structlog
 from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException
 
-from ...dependencies import get_quiz_repository, get_video_job_repository
+from ...dependencies import get_quiz_repository, get_content_job_repository
 from ..schemas import QuizResponse, QuizSubmission
 from ....core.exceptions import JobNotFoundError
 from ....services.quiz_evaluator import QuizEvaluator
@@ -14,15 +14,15 @@ settings = get_settings()
 router = APIRouter()
 
 @router.get("", response_model=Dict[str, Any])
-async def get_video_quiz(
-    video_id: int,
+async def get_content_quiz(
+    content_id: int,
     quiz_repo = Depends(get_quiz_repository),
-    video_repo = Depends(get_video_job_repository)
+    content_repo = Depends(get_content_job_repository)
 ) -> Dict[str, Any]:
     try:
-        job = video_repo.get(video_id)
+        job = content_repo.get(content_id)
         if not job:
-            raise JobNotFoundError(video_id)
+            raise JobNotFoundError(content_id)
 
         if job.status != "completed":
             raise HTTPException(
@@ -30,7 +30,7 @@ async def get_video_quiz(
                 detail=f"Quiz not available. Job status: {job.status}"
             )
 
-        questions = quiz_repo.get_questions_by_job_id(video_id)
+        questions = quiz_repo.get_questions_by_job_id(content_id)
         if not questions:
             raise HTTPException(
                 status_code=404,
@@ -57,7 +57,7 @@ async def get_video_quiz(
 
             quiz_questions.append(question_data)
 
-        total_score = quiz_repo.get_total_score_by_job_id(video_id)
+        total_score = quiz_repo.get_total_score_by_job_id(content_id)
 
         return {
             "questions": quiz_questions,
@@ -70,23 +70,23 @@ async def get_video_quiz(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Failed to get quiz questions", video_id=video_id, error=str(e))
+        logger.error("Failed to get quiz questions", content_id=content_id, error=str(e))
         raise HTTPException(status_code=500, detail="Failed to retrieve quiz questions")
 
 
 @router.post("", response_model=Dict[str, Any])
-async def submit_video_quiz(
-    video_id: int,
+async def submit_content_quiz(
+    content_id: int,
     submission: QuizSubmission,
     quiz_repo = Depends(get_quiz_repository),
-    video_repo = Depends(get_video_job_repository)
+    content_repo = Depends(get_content_job_repository)
 ) -> Dict[str, Any]:
     try:
-        job = video_repo.get(video_id)
+        job = content_repo.get(content_id)
         if not job:
-            raise JobNotFoundError(video_id)
+            raise JobNotFoundError(content_id)
 
-        questions = quiz_repo.get_questions_by_job_id(video_id)
+        questions = quiz_repo.get_questions_by_job_id(content_id)
         if not questions:
             raise HTTPException(
                 status_code=404,
@@ -128,7 +128,7 @@ async def submit_video_quiz(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Failed to submit quiz", video_id=video_id, error=str(e))
+        logger.error("Failed to submit quiz", content_id=content_id, error=str(e))
         raise HTTPException(status_code=500, detail="Failed to evaluate quiz submission")
 
 

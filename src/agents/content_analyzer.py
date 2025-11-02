@@ -3,9 +3,9 @@ from typing import Dict, Any, List
 
 import openai
 
-from .base import VideoTutorAgent
+from .base import ContentTutorAgent
 from ..config import get_settings
-from ..models.video_job import VideoJob
+from ..models.content_job import ContentJob
 from ..core.database import SessionLocal
 
 settings = get_settings()
@@ -13,7 +13,7 @@ settings = get_settings()
 # Testing for pr raise
 
 
-class ContentAnalyzerAgent(VideoTutorAgent):
+class ContentAnalyzerAgent(ContentTutorAgent):
     def __init__(self):
         super().__init__("content_analyzer")
         self.chunk_size = 2000

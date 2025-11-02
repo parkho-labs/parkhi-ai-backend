@@ -39,7 +39,7 @@ def get_db() -> Generator[Session, None, None]:
 
 def create_tables():
     # Import models to register them with Base
-    from ..models import video_job, quiz_question
+    from ..models import content_job, uploaded_file, user, quiz_question
     Base.metadata.create_all(bind=engine)
 
 

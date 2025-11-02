@@ -1,1 +1,1 @@
-"""AI agent layer - Video extraction, content analysis, question generation."""
+"""AI agent layer - Content analysis, question generation, workflow orchestration."""

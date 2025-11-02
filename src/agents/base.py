@@ -2,21 +2,21 @@ import structlog
 from typing import Optional
 from datetime import datetime
 
-from ..models.video_job import VideoJob
+from ..models.content_job import ContentJob
 from ..core.database import SessionLocal
 from ..core.websocket_manager import websocket_manager
 
 logger = structlog.get_logger(__name__)
 
-class VideoTutorAgent:
+class ContentTutorAgent:
     def __init__(self, name: str):
         self.name = name
 
     async def run(self, job_id: int, data: dict) -> dict:
         raise NotImplementedError("Subclasses must implement run method")
 
-    def _get_job(self, db, job_id: int) -> Optional[VideoJob]:
-        return db.query(VideoJob).filter(VideoJob.id == job_id).first()
+    def _get_job(self, db, job_id: int) -> Optional[ContentJob]:
+        return db.query(ContentJob).filter(ContentJob.id == job_id).first()
 
     async def update_job_progress(self, job_id: int, progress: float, message: Optional[str] = None):
         db = SessionLocal()

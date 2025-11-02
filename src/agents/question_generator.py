@@ -3,16 +3,16 @@ from typing import Dict, Any, List
 
 import openai
 
-from .base import VideoTutorAgent
+from .base import ContentTutorAgent
 from ..config import get_settings
-from ..models.video_job import VideoJob
+from ..models.content_job import ContentJob
 from ..repositories.quiz_repository import QuizRepository
 from ..core.database import SessionLocal
 
 settings = get_settings()
 
 
-class QuestionGeneratorAgent(VideoTutorAgent):
+class QuestionGeneratorAgent(ContentTutorAgent):
     def __init__(self):
         super().__init__("question_generator")
 

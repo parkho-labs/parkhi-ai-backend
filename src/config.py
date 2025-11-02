@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     max_concurrent_jobs: int = Field(default=5, description="Maximum concurrent processing jobs")
     job_timeout_minutes: int = Field(default=10, description="Job timeout in minutes")
     temp_files_dir: str = Field(default="/tmp/ai_video_tutor", description="Temporary files directory")
+    file_storage_dir: str = Field(default="./uploaded_files", description="Persistent file storage directory")
     
     whisper_model: str = Field(default="base", description="Whisper model to use")
     audio_chunk_duration_minutes: int = Field(default=10, description="Audio chunk duration in minutes")

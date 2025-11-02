@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from enum import Enum
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, validator
 
 
 class JobStatus(str, Enum):
@@ -30,30 +30,128 @@ class LLMProvider(str, Enum):
     ANTHROPIC = "anthropic"
 
 
-class VideoProcessingRequest(BaseModel):
-    video_url: HttpUrl
-    question_types: List[QuestionType] = Field(default=[QuestionType.MULTIPLE_CHOICE, QuestionType.TRUE_FALSE])
+class InputType(str, Enum):
+    YOUTUBE = "youtube"
+    PDF = "pdf"
+    DOCX = "docx"
+    WEB_URL = "web_url"
+
+
+class ContentProcessingRequest(BaseModel):
+    input_url: Optional[str] = None
+    file_ids: List[str] = Field(default=[])
+    question_types: List[QuestionType] = Field(default=[QuestionType.MULTIPLE_CHOICE])
     difficulty_level: DifficultyLevel = Field(default=DifficultyLevel.INTERMEDIATE)
-    num_questions: int = Field(default=10, ge=1, le=50)
+    num_questions: int = Field(default=5, ge=1, le=50)
     generate_summary: bool = Field(default=True)
     llm_provider: LLMProvider = Field(default=LLMProvider.OPENAI)
 
+    @validator('file_ids')
+    def validate_single_file_limit(cls, v):
+        if len(v) > 1:
+            raise ValueError('Currently only single file processing is supported. Please provide exactly one file_id.')
+        return v
 
-class JobStatusResponse(BaseModel):
+    @validator('file_ids', 'input_url')
+    def validate_single_content_source(cls, v, values):
+        # Ensure only one content source is provided
+        input_url = values.get('input_url')
+        file_ids = v if isinstance(v, list) else values.get('file_ids', [])
+
+        content_sources = sum([
+            1 if input_url else 0,
+            1 if file_ids else 0
+        ])
+
+        if content_sources == 0:
+            raise ValueError('Please provide either input_url or file_ids.')
+        elif content_sources > 1:
+            raise ValueError('Please provide either input_url OR file_ids, not both.')
+
+        return v
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "input_url": "https://youtube.com/watch?v=abc123",
+                "file_ids": ["file_id_1"],
+                "question_types": ["multiple_choice", "short_answer"],
+                "difficulty_level": "intermediate",
+                "num_questions": 5,
+                "generate_summary": True,
+                "llm_provider": "openai"
+            }
+        }
+
+
+class FileUploadResponse(BaseModel):
+    file_id: str
+    filename: str
+    file_size: int
+    content_type: Optional[str]
+    upload_timestamp: datetime
+
+
+class ContentJobResponse(BaseModel):
     id: int
     status: JobStatus
     progress: float = Field(..., ge=0.0, le=100.0)
     created_at: datetime
     completed_at: Optional[datetime]
-    video_url: str
-    video_title: Optional[str]
-    video_duration: Optional[int]
+    title: Optional[str]
     error_message: Optional[str]
+    input_url: Optional[str] = None
+    file_ids: List[str] = Field(default=[])
 
     class Config:
         from_attributes = True
 
 
+# Individual file processing result for 207 Multi-Status response
+class FileProcessingResult(BaseModel):
+    file_id: str
+    job_id: Optional[int] = None
+    status: JobStatus
+    message: str
+    estimated_duration_minutes: Optional[int] = None
+    websocket_url: Optional[str] = None
+    error_details: Optional[str] = None
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "file_id": "file_abc123",
+                "job_id": 42,
+                "status": "processing",
+                "message": "File processing started successfully",
+                "estimated_duration_minutes": 5,
+                "websocket_url": "ws://127.0.0.1:8080/ws/jobs/42"
+            }
+        }
+
+
+# 207 Multi-Status response for content processing
+class MultiStatusProcessingResponse(BaseModel):
+    results: List[FileProcessingResult]
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "results": [
+                    {
+                        "file_id": "file_abc123",
+                        "job_id": 42,
+                        "status": "processing",
+                        "message": "File processing started successfully",
+                        "estimated_duration_minutes": 5,
+                        "websocket_url": "ws://127.0.0.1:8080/ws/jobs/42"
+                    }
+                ]
+            }
+        }
+
+
+# Legacy single job response (kept for backward compatibility)
 class ProcessingJobResponse(BaseModel):
     job_id: int
     status: JobStatus
@@ -62,22 +160,24 @@ class ProcessingJobResponse(BaseModel):
     websocket_url: str
 
 
-class ProcessingResults(BaseModel):
+class ContentResults(BaseModel):
     job_id: int
     status: JobStatus
-    video_title: Optional[str]
-    video_duration: Optional[int]
+    title: Optional[str]
     processing_duration_seconds: Optional[int]
     created_at: datetime
     completed_at: Optional[datetime]
+    summary: Optional[str] = None
+    questions: Optional[List[dict]] = None
+    content_text: Optional[str] = None
 
 
 class SummaryResponse(BaseModel):
     summary: Optional[str]
 
 
-class TranscriptResponse(BaseModel):
-    transcript: Optional[str]
+class ContentTextResponse(BaseModel):
+    content_text: Optional[str]
 
 
 class WebSocketMessage(BaseModel):
@@ -87,9 +187,9 @@ class WebSocketMessage(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
-class JobsListResponse(BaseModel):
+class ContentJobsListResponse(BaseModel):
     total: int
-    jobs: List[JobStatusResponse]
+    jobs: List[ContentJobResponse]
 
 
 class ErrorResponse(BaseModel):

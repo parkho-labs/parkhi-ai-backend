@@ -85,18 +85,10 @@ async def create_user(
         )
 
     except Exception as e:
-        # Handle RAG engine registration failures and other errors
-        error_message = str(e)
-        if "RAG registration failed" in error_message:
-            raise HTTPException(
-                status_code=503,
-                detail=f"User registration failed due to external service error: {error_message}"
-            )
-        else:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to create user: {error_message}"
-            )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create user: {str(e)}"
+        )
 
 @router.get("/me", response_model=Optional[UserResponse])
 async def get_current_user(

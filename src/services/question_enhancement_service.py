@@ -67,9 +67,22 @@ class QuestionEnhancementService:
             return ""
 
         try:
+            user_id = "default_user"
+            if job_id:
+                from ..core.database import SessionLocal
+                from ..models.content_job import ContentJob
+                db = SessionLocal()
+                try:
+                    job = db.query(ContentJob).filter(ContentJob.id == job_id).first()
+                    if job and job.user_id:
+                        user_id = job.user_id
+                finally:
+                    db.close()
+
             context = await self.rag_service.get_collection_context(
                 collection_name=collection_name,
-                query=query
+                topic=query,
+                user_id=user_id
             )
             return context or ""
         except Exception as e:

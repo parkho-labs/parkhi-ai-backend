@@ -44,7 +44,8 @@ class YouTubeParser(BaseContentParser):
                 metadata={
                     "duration": video_info["duration"],
                     "url": source,
-                    "description": video_info.get("description", "")
+                    "description": video_info.get("description", ""),
+                    "source_type": "youtube"
                 }
             )
         except Exception as e:

@@ -99,17 +99,23 @@ class RAGIntegrationService:
         self,
         collection_name: str,
         query: str,
+        user_id: str,
         enable_critic: bool = True
     ) -> Dict[str, Any]:
-        
+
         try:
             payload = {
                 "query": query,
                 "enable_critic": enable_critic
             }
+            headers = {
+                "x-user-id": user_id,
+                "Content-Type": "application/json"
+            }
             response = await self.client.post(
                 f"{self.base_url}/{collection_name}/query",
-                json=payload
+                json=payload,
+                headers=headers
             )
             response.raise_for_status()
             return response.json()
@@ -122,24 +128,30 @@ class RAGIntegrationService:
                 "chunks": []
             }
 
-    async def get_collection_context(self, collection_name: str, topic: str) -> str:
-       
+    async def get_embeddings(self, collection_name: str, user_id: str, limit: int = 100) -> List[Dict[str, Any]]:
         try:
-            query_result = await self.query_collection(collection_name, topic)
+            url = f"{self.base_url}/{collection_name}/embeddings"
+            headers = {"x-user-id": user_id}
+            params = {"limit": min(limit, 500)}
 
-            if query_result.get('is_relevant', False):
-                context_parts = [query_result.get('answer', '')]
+            logger.info(f"RAG embeddings call: {url} with user_id={user_id}")
+            response = await self.client.get(url, headers=headers, params=params)
+            response.raise_for_status()
 
-                for chunk in query_result.get('chunks', []):
-                    if chunk.get('text'):
-                        context_parts.append(chunk['text'])
+            data = response.json()
+            logger.info(f"RAG response status: {data.get('status')}, embeddings count: {len(data.get('body', {}).get('embeddings', []))}")
 
-                return "\n\n".join(filter(None, context_parts))
-
-            return ""
+            return data.get("body", {}).get("embeddings", [])
         except Exception as e:
-            logger.error(f"Failed to get collection context: {e}")
+            logger.error(f"Failed to get embeddings for {collection_name} with user {user_id}: {e}")
+            return []
+
+    async def get_collection_context(self, collection_name: str, topic: str, user_id: str) -> str:
+        embeddings = await self.get_embeddings(collection_name, user_id, 50)
+        if not embeddings:
             return ""
+        chunks = [e.get('text', '') for e in embeddings if e.get('text')]
+        return "\n\n".join(chunks)
 
     async def upload_and_link_content(
         self,

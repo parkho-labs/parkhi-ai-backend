@@ -55,6 +55,7 @@ class WebParser(BaseContentParser):
                 return ContentParseResult("", error="No readable content found on webpage")
 
             metadata = self._extract_metadata(soup, response, source)
+            metadata["source_type"] = "web_url"
 
             return ContentParseResult(
                 content=content.strip(),

@@ -1,6 +1,6 @@
 import structlog
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -65,6 +65,16 @@ def create_application() -> FastAPI:
         allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def handle_common_requests(request: Request, call_next):
+        # Handle common requests that cause warnings
+        common_paths = ["/favicon.ico", "/robots.txt", "/sitemap.xml", "/apple-touch-icon.png"]
+        if request.url.path in common_paths:
+            return JSONResponse(status_code=404, content={"detail": "Not found"})
+
+        response = await call_next(request)
+        return response
     
     @app.exception_handler(Exception)
     async def global_exception_handler(request, exc):
@@ -105,6 +115,6 @@ if __name__ == "__main__":
         host=settings.api_host,
         port=settings.api_port,
         reload=settings.debug,
-        log_level=settings.log_level.lower(),
-        access_log=True,
+        log_level="info",
+        access_log=False,
     )

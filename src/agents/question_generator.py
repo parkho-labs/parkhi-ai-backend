@@ -2,56 +2,98 @@ import json
 from typing import Dict, Any, List
 import structlog
 
-import openai
-
 from .base import ContentTutorAgent
-from ..config import get_settings
+from .physics_tutor_agent import PhysicsTutorAgent
 from ..repositories.quiz_repository import QuizRepository
 from ..core.database import SessionLocal
-from ..services.llm_service import LLMService
-from .prompts import QuestionGenerationPrompts
-from ..api.v1.schemas import QuestionType, QuestionTypeCount, QuestionCountsResponse
+from ..api.v1.schemas import QuestionType, QuestionTypeCount, QuestionCountsResponse, ContentSubject
 
-settings = get_settings()
 logger = structlog.get_logger(__name__)
 
 
 class QuestionGeneratorAgent(ContentTutorAgent):
     def __init__(self):
         super().__init__("question_generator")
+        self.physics_tutor = PhysicsTutorAgent()
 
-        self.llm_service = LLMService(
-            openai_api_key=settings.openai_api_key,
-            anthropic_api_key=settings.anthropic_api_key,
-            google_api_key=settings.google_api_key
-        )
+    def determine_subject_type(self, content: str) -> ContentSubject:
+        content_lower = content.lower()
 
+        physics_keywords = ["force", "energy", "momentum", "velocity", "acceleration", "gravity", "wave", "frequency", "quantum", "thermodynamics", "mechanics", "optics", "electromagnetic", "nuclear", "atom", "particle", "newton", "einstein", "physics", "kinematics", "dynamics"]
+        math_keywords = ["equation", "algebra", "calculus", "geometry", "theorem", "function", "derivative", "integral", "matrix", "polynomial", "trigonometry", "statistics", "probability", "mathematics", "math"]
+        chemistry_keywords = ["molecule", "reaction", "element", "compound", "bond", "atom", "periodic", "chemical", "solution", "acid", "base", "organic", "inorganic", "chemistry"]
+        biology_keywords = ["cell", "organism", "DNA", "protein", "evolution", "species", "gene", "ecosystem", "bacteria", "virus", "tissue", "organ", "biology", "life"]
 
-    def get_model_client(self):
-        return openai.OpenAI(api_key=settings.openai_api_key)
+        if sum(1 for k in physics_keywords if k in content_lower) >= 3:
+            return ContentSubject.PHYSICS
+        if sum(1 for k in math_keywords if k in content_lower) >= 3:
+            return ContentSubject.MATHEMATICS
+        if sum(1 for k in chemistry_keywords if k in content_lower) >= 3:
+            return ContentSubject.CHEMISTRY
+        if sum(1 for k in biology_keywords if k in content_lower) >= 3:
+            return ContentSubject.BIOLOGY
 
+        return ContentSubject.GENERAL
 
     async def run(self, job_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
         transcript = data.get("transcript")
-        content_analysis = data.get("content_analysis", {})
-        key_concepts = data.get("key_concepts", [])
-
-        question_types = data.get("question_types", ["multiple_choice", "true_false"])
-        difficulty_level = data.get("difficulty_level", "intermediate")
-        num_questions = data.get("num_questions", 10)
+        title = data.get("title", "")
+        rag_context = data.get("rag_context", "")
 
         if not transcript:
             raise ValueError("No transcript available for question generation")
 
-        logger.info(f"QuestionGenerator received data keys: {list(data.keys())}")
-
         try:
-            await self.update_job_progress(job_id, 80.0, "Generating questions")
+            await self.update_job_progress(job_id, 80.0, "Detecting subject and generating questions")
 
-            questions = await self.generate_questions(
-                transcript, content_analysis, key_concepts,
-                question_types, difficulty_level, num_questions
-            )
+            subject = self.determine_subject_type(f"{title} {transcript}")
+
+            match subject:
+                case ContentSubject.PHYSICS:
+                    questions_data = await self.physics_tutor.generate_educational_questions(
+                        query=f"Generate quiz questions for: {title}",
+                        context=f"{rag_context}\n\n{transcript}",
+                        job_id=job_id,
+                        difficulty_level=data.get("difficulty_level", "intermediate"),
+                        content_type=ContentSubject.PHYSICS
+                    )
+                    questions = self.convert_physics_format_to_standard(questions_data.get("questions", []))
+                case ContentSubject.MATHEMATICS:
+                    questions_data = await self.physics_tutor.generate_educational_questions(
+                        query=f"Generate quiz questions for: {title}",
+                        context=f"{rag_context}\n\n{transcript}",
+                        job_id=job_id,
+                        difficulty_level=data.get("difficulty_level", "intermediate"),
+                        content_type=ContentSubject.MATHEMATICS
+                    )
+                    questions = self.convert_physics_format_to_standard(questions_data.get("questions", []))
+                case ContentSubject.CHEMISTRY:
+                    questions_data = await self.physics_tutor.generate_educational_questions(
+                        query=f"Generate quiz questions for: {title}",
+                        context=f"{rag_context}\n\n{transcript}",
+                        job_id=job_id,
+                        difficulty_level=data.get("difficulty_level", "intermediate"),
+                        content_type=ContentSubject.CHEMISTRY
+                    )
+                    questions = self.convert_physics_format_to_standard(questions_data.get("questions", []))
+                case ContentSubject.BIOLOGY:
+                    questions_data = await self.physics_tutor.generate_educational_questions(
+                        query=f"Generate quiz questions for: {title}",
+                        context=f"{rag_context}\n\n{transcript}",
+                        job_id=job_id,
+                        difficulty_level=data.get("difficulty_level", "intermediate"),
+                        content_type=ContentSubject.BIOLOGY
+                    )
+                    questions = self.convert_physics_format_to_standard(questions_data.get("questions", []))
+                case _:
+                    questions_data = await self.physics_tutor.generate_educational_questions(
+                        query=f"Generate quiz questions for: {title}",
+                        context=f"{rag_context}\n\n{transcript}",
+                        job_id=job_id,
+                        difficulty_level=data.get("difficulty_level", "intermediate"),
+                        content_type=ContentSubject.GENERAL
+                    )
+                    questions = self.convert_physics_format_to_standard(questions_data.get("questions", []))
 
             await self.update_job_progress(job_id, 90.0, "Question generation completed")
             await self.save_quiz_questions(job_id, questions)
@@ -62,166 +104,68 @@ class QuestionGeneratorAgent(ContentTutorAgent):
             await self.mark_job_failed(job_id, f"Question generation failed: {str(e)}")
             raise
 
-    async def generate_questions(self, transcript: str, content_analysis: Dict[str, Any],
-                                key_concepts: List[Dict[str, Any]], question_types: List[str],
-                                difficulty_level: str, num_questions: int, strategy_name: str = None) -> List[Dict[str, Any]]:
 
-        question_counts_response = self._get_question_strategy(question_types, strategy_name)
+    def convert_physics_format_to_standard(self, physics_questions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        standard_questions = []
 
-        all_questions = []
-        question_id_counter = 1
+        for i, pq in enumerate(physics_questions):
+            if not isinstance(pq, dict):
+                continue
 
-        for question_type in question_types:
-            count = question_counts_response.get_count_for_type(question_type)
-            questions = await self.generate_questions_by_type(
-                transcript, content_analysis, key_concepts,
-                question_type, difficulty_level, count
-            )
+            if "question_config" in pq:
+                question_config = pq.get("question_config", {})
+                answer_config = pq.get("answer_config", {})
+                question_text = question_config.get("question_text", "")
+                options = answer_config.get("options", [])
+                correct_answer = answer_config.get("correct_answer", "")
+                explanation = answer_config.get("reason", "") or question_config.get("explanation", "")
+                question_type = question_config.get("type", "")
+            else:
+                question_text = pq.get("question_text", "")
+                options = pq.get("options", [])
+                correct_answer = pq.get("correct_answer", "")
+                explanation = pq.get("explanation", "")
+                question_type = pq.get("type", "")
 
-            for q in questions:
-                q["question_id"] = f"q{question_id_counter}"
-                question_id_counter += 1
+            if not question_text:
+                continue
 
-            all_questions.extend(questions)
+            if len(options) >= 4:
+                options_dict = {
+                    "A": options[0] if len(options) > 0 else "",
+                    "B": options[1] if len(options) > 1 else "",
+                    "C": options[2] if len(options) > 2 else "",
+                    "D": options[3] if len(options) > 3 else ""
+                }
 
-        return all_questions
+                correct_letter = "A"
+                if correct_answer in options:
+                    answer_index = options.index(correct_answer)
+                    correct_letter = ["A", "B", "C", "D"][answer_index]
 
-    def _get_question_strategy(self, question_types: List[str], strategy_name: str = None) -> QuestionCountsResponse:
-        import random
+                final_answer_config = {
+                    "options": options_dict,
+                    "correct_answer": correct_letter
+                }
+                question_type = question_type or "multiple_choice"
+            else:
+                final_answer_config = {
+                    "correct_answer": correct_answer
+                }
+                question_type = question_type or "short_answer"
 
-        strategies = {
-            "balanced": {"multiple_choice": 5, "true_false": 3, "short_answer": 2},
-            "mcq_focused": {"multiple_choice": 8, "true_false": 2, "short_answer": 0},
-            "quick_assessment": {"multiple_choice": 3, "true_false": 5, "short_answer": 2},
-            "analytical": {"multiple_choice": 3, "true_false": 2, "short_answer": 5},
-            "quiz_style": {"multiple_choice": 6, "true_false": 4, "short_answer": 0}
-        }
+            standard_question = {
+                "question_id": f"q{i+1}",
+                "question": question_text,
+                "type": question_type,
+                "answer_config": final_answer_config,
+                "context": explanation,
+                "max_score": 1
+            }
 
-        if strategy_name and strategy_name in strategies:
-            chosen_strategy = strategies[strategy_name]
-        elif QuestionType.SHORT_ANSWER in question_types:
-            chosen_strategy = random.choice([strategies["balanced"], strategies["analytical"], strategies["quick_assessment"]])
-        else:
-            chosen_strategy = random.choice([strategies["mcq_focused"], strategies["quiz_style"]])
+            standard_questions.append(standard_question)
 
-        counts = [
-            QuestionTypeCount(question_type=QuestionType.MULTIPLE_CHOICE, count=chosen_strategy["multiple_choice"]),
-            QuestionTypeCount(question_type=QuestionType.TRUE_FALSE, count=chosen_strategy["true_false"]),
-            QuestionTypeCount(question_type=QuestionType.SHORT_ANSWER, count=chosen_strategy["short_answer"])
-        ]
-
-        return QuestionCountsResponse(counts=counts)
-
-    async def generate_questions_by_type(self, transcript: str, content_analysis: Dict[str, Any],
-                                        key_concepts: List[Dict[str, Any]], question_type: str,
-                                        difficulty_level: str, num_questions: int) -> List[Dict[str, Any]]:
-
-        if question_type == "multiple_choice":
-            return await self.generate_mcq(transcript, content_analysis, difficulty_level, num_questions)
-        elif question_type == "true_false":
-            return await self.generate_true_false(transcript, content_analysis, difficulty_level, num_questions)
-        elif question_type == "short_answer":
-            return await self.generate_short_answer(transcript, key_concepts, difficulty_level, num_questions)
-        elif question_type == "long_form":
-            return await self.generate_long_form(transcript, content_analysis, difficulty_level, num_questions)
-        else:
-            return []
-
-    async def generate_mcq(self, transcript: str, content_analysis: Dict[str, Any],
-                          difficulty_level: str, num_questions: int) -> List[Dict[str, Any]]:
-
-        system_prompt = QuestionGenerationPrompts.get_multiple_choice_prompt(num_questions, difficulty_level)
-
-        content_summary = f"Main topics: {', '.join(content_analysis.get('main_topics', []))}"
-        user_content = f"{content_summary}\n\nContent: {transcript[:3000]}"
-
-        try:
-            questions = await self.call_model(system_prompt, user_content)
-
-            for q in questions:
-                q["type"] = "multiple_choice"
-
-            return questions if isinstance(questions, list) else []
-        except Exception:
-            return []
-
-    async def generate_true_false(self, transcript: str, content_analysis: Dict[str, Any],
-                                 difficulty_level: str, num_questions: int) -> List[Dict[str, Any]]:
-
-        system_prompt = QuestionGenerationPrompts.get_true_false_prompt(num_questions, difficulty_level)
-
-        content_summary = f"Main topics: {', '.join(content_analysis.get('main_topics', []))}"
-        user_content = f"{content_summary}\n\nContent: {transcript[:3000]}"
-
-        try:
-            questions = await self.call_model(system_prompt, user_content)
-
-            for q in questions:
-                q["type"] = "true_false"
-                # Normalize correct_answer to string if LLM returned boolean
-                if "answer_config" in q and "correct_answer" in q["answer_config"]:
-                    answer = q["answer_config"]["correct_answer"]
-                    if isinstance(answer, bool):
-                        q["answer_config"]["correct_answer"] = "true" if answer else "false"
-
-            return questions if isinstance(questions, list) else []
-        except Exception:
-            return []
-
-    async def generate_short_answer(self, transcript: str, key_concepts: List[Dict[str, Any]],
-                                   difficulty_level: str, num_questions: int) -> List[Dict[str, Any]]:
-
-        system_prompt = QuestionGenerationPrompts.get_short_answer_prompt(num_questions, difficulty_level)
-
-        concepts_summary = "\n".join([f"- {c.get('concept', '')}: {c.get('definition', '')}"
-                                     for c in key_concepts[:5]])
-        user_content = f"Key concepts:\n{concepts_summary}\n\nContent: {transcript[:3000]}"
-
-        try:
-            questions = await self.call_model(system_prompt, user_content)
-
-            for q in questions:
-                q["type"] = "short_answer"
-
-            return questions if isinstance(questions, list) else []
-        except Exception:
-            return []
-
-    async def generate_long_form(self, transcript: str, content_analysis: Dict[str, Any],
-                                difficulty_level: str, num_questions: int) -> List[Dict[str, Any]]:
-
-        system_prompt = QuestionGenerationPrompts.get_essay_prompt(num_questions, difficulty_level)
-
-        learning_objectives = content_analysis.get('learning_objectives', [])
-        objectives_text = "\n".join([f"- {obj}" for obj in learning_objectives])
-        user_content = f"Learning objectives:\n{objectives_text}\n\nContent: {transcript[:3000]}"
-
-        try:
-            questions = await self.call_model(system_prompt, user_content)
-
-            for q in questions:
-                q["question_type"] = "long_form"
-                q["difficulty"] = difficulty_level
-                q["options"] = None
-
-            return questions if isinstance(questions, list) else []
-        except Exception:
-            return []
-
-    async def call_model(self, system_prompt: str, user_content: str) -> List[Dict[str, Any]]:
-        client = self.get_model_client()
-
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            temperature=0.2,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ]
-        )
-        content = response.choices[0].message.content
-
-        return json.loads(content)
+        return standard_questions
 
     async def save_quiz_questions(self, job_id: int, questions: List[Dict[str, Any]]):
         db = SessionLocal()

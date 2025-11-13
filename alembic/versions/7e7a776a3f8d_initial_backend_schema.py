@@ -1,8 +1,8 @@
-"""Create all tables
+"""initial backend schema
 
-Revision ID: af3e0682e359
+Revision ID: 7e7a776a3f8d
 Revises: 
-Create Date: 2025-11-06 12:27:34.732038
+Create Date: 2025-11-13 13:05:14.004873
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'af3e0682e359'
+revision: str = '7e7a776a3f8d'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -33,20 +33,20 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_uploaded_files_id'), 'uploaded_files', ['id'], unique=False)
     op.create_table('users',
-    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('user_id', sa.String(), nullable=False),
     sa.Column('firebase_uid', sa.String(), nullable=False),
     sa.Column('email', sa.String(), nullable=False),
     sa.Column('full_name', sa.String(), nullable=False),
     sa.Column('date_of_birth', sa.Date(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('user_id')
     )
     op.create_index(op.f('ix_users_email'), 'users', ['email'], unique=False)
     op.create_index(op.f('ix_users_firebase_uid'), 'users', ['firebase_uid'], unique=True)
-    op.create_index(op.f('ix_users_id'), 'users', ['id'], unique=False)
+    op.create_index(op.f('ix_users_user_id'), 'users', ['user_id'], unique=False)
     op.create_table('content_jobs',
     sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('user_id', sa.Integer(), nullable=True),
+    sa.Column('user_id', sa.String(), nullable=True),
     sa.Column('status', sa.String(), nullable=False),
     sa.Column('progress', sa.Float(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
@@ -58,18 +58,18 @@ def upgrade() -> None:
     sa.Column('collection_name', sa.String(), nullable=True),
     sa.Column('should_add_to_collection', sa.Boolean(), nullable=True),
     sa.Column('rag_context_used', sa.Boolean(), nullable=True),
-    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
+    sa.ForeignKeyConstraint(['user_id'], ['users.user_id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_content_jobs_id'), 'content_jobs', ['id'], unique=False)
     op.create_table('user_events',
     sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('user_id', sa.Integer(), nullable=False),
+    sa.Column('user_id', sa.String(), nullable=False),
     sa.Column('session_id', sa.String(length=50), nullable=True),
     sa.Column('event_name', sa.String(length=100), nullable=False),
     sa.Column('properties', sa.JSON(), nullable=True),
     sa.Column('timestamp', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
-    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
+    sa.ForeignKeyConstraint(['user_id'], ['users.user_id'], ),
     sa.PrimaryKeyConstraint('id'),
     sqlite_autoincrement=True
     )
@@ -107,7 +107,7 @@ def downgrade() -> None:
     op.drop_table('user_events')
     op.drop_index(op.f('ix_content_jobs_id'), table_name='content_jobs')
     op.drop_table('content_jobs')
-    op.drop_index(op.f('ix_users_id'), table_name='users')
+    op.drop_index(op.f('ix_users_user_id'), table_name='users')
     op.drop_index(op.f('ix_users_firebase_uid'), table_name='users')
     op.drop_index(op.f('ix_users_email'), table_name='users')
     op.drop_table('users')

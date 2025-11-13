@@ -41,6 +41,7 @@ class DOCXParser(BaseContentParser):
                 return ContentParseResult("", error="No text content found in DOCX")
 
             metadata = self._extract_metadata(document, source)
+            metadata["source_type"] = "docx"
 
             return ContentParseResult(
                 content=content.strip(),

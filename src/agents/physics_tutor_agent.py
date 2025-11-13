@@ -3,7 +3,9 @@ from typing import Dict, Any, Optional, List
 
 from .base import ContentTutorAgent
 from .prompts import PhysicsTeacherPrompts
+from ..api.v1.schemas import ContentSubject
 from ..services.llm_service import LLMService, LLMProvider
+from ..api.dependencies import get_llm_service
 from ..config import get_settings
 
 logger = structlog.get_logger(__name__)
@@ -11,13 +13,9 @@ settings = get_settings()
 
 
 class PhysicsTutorAgent(ContentTutorAgent):
-    def __init__(self):
+    def __init__(self, llm_service: LLMService = None):
         super().__init__(name="PhysicsTutorAgent")
-        self.llm_service = LLMService(
-            openai_api_key=settings.openai_api_key,
-            anthropic_api_key=settings.anthropic_api_key,
-            google_api_key=settings.google_api_key
-        )
+        self.llm_service = llm_service or get_llm_service()
 
     async def run(self, job_id: int, data: dict) -> dict:
         try:
@@ -61,23 +59,50 @@ class PhysicsTutorAgent(ContentTutorAgent):
         context: str,
         job_id: Optional[int] = None,
         difficulty_level: str = "intermediate",
-        use_jee_template: bool = False
+        use_jee_template: bool = False,
+        content_type: ContentSubject = ContentSubject.PHYSICS
     ) -> Dict[str, Any]:
         try:
             if job_id:
                 await self.update_job_progress(job_id, 30.0, "Generating educational questions")
 
-            if use_jee_template or "jee" in query.lower() or "advanced" in difficulty_level.lower():
-                prompt = PhysicsTeacherPrompts.get_jee_advanced_template(
-                    context=context,
-                    query=query,
-                    difficulty_level=difficulty_level
-                )
-            else:
-                prompt = PhysicsTeacherPrompts.get_educational_json_template(
-                    context=context,
-                    query=query
-                )
+            match content_type:
+                case ContentSubject.PHYSICS:
+                    if use_jee_template or "jee" in query.lower() or "advanced" in difficulty_level.lower():
+                        prompt = PhysicsTeacherPrompts.get_jee_advanced_template(
+                            context=context,
+                            query=query,
+                            difficulty_level=difficulty_level
+                        )
+                    else:
+                        prompt = PhysicsTeacherPrompts.get_educational_json_template(
+                            context=context,
+                            query=query
+                        )
+                case ContentSubject.MATHEMATICS:
+                    prompt = PhysicsTeacherPrompts.get_mathematics_template(
+                        context=context,
+                        query=query,
+                        difficulty_level=difficulty_level
+                    )
+                case ContentSubject.CHEMISTRY:
+                    prompt = PhysicsTeacherPrompts.get_chemistry_template(
+                        context=context,
+                        query=query,
+                        difficulty_level=difficulty_level
+                    )
+                case ContentSubject.BIOLOGY:
+                    prompt = PhysicsTeacherPrompts.get_biology_template(
+                        context=context,
+                        query=query,
+                        difficulty_level=difficulty_level
+                    )
+                case _:
+                    prompt = PhysicsTeacherPrompts.get_general_template(
+                        context=context,
+                        query=query,
+                        difficulty_level=difficulty_level
+                    )
 
             if job_id:
                 await self.update_job_progress(job_id, 50.0, "Processing with LLM")
@@ -87,7 +112,7 @@ class PhysicsTutorAgent(ContentTutorAgent):
                 system_prompt=system_message,
                 user_prompt=prompt,
                 temperature=0.7,
-                max_tokens=10000,
+                max_tokens=settings.question_generation_max_tokens,
                 preferred_provider=LLMProvider.OPENAI
             )
 

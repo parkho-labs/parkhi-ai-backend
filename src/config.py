@@ -94,8 +94,13 @@ class Settings(BaseSettings):
 
     # LLM Question Generation
     question_generation_temperature: float = Field(default=0.7, description="LLM temperature for question generation")
-    question_generation_max_tokens: int = Field(default=10000, description="Max tokens for question generation")
+    question_generation_max_tokens: int = Field(default=4000, description="Max tokens for question generation")
     preferred_question_provider: str = Field(default="openai", description="Preferred LLM provider for questions")
+    google_model_name: str = Field(default="gemini-1.5-flash-latest", description="Google Gemini model name")
+
+    # Demo Mode Configuration
+    demo_mode: bool = Field(default=False, description="Enable demo mode for development")
+    demo_user_id: str = Field(default="demo-user-123", description="Default demo user ID")
 
     class Config:
         env_file = [".env.local", ".env"]

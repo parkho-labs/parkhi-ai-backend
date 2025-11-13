@@ -21,11 +21,13 @@ class LLMService:
         self,
         openai_api_key: Optional[str] = None,
         anthropic_api_key: Optional[str] = None,
-        google_api_key: Optional[str] = None
+        google_api_key: Optional[str] = None,
+        google_model_name: str = "gemini-1.5-flash"
     ):
         self.openai_api_key = openai_api_key
         self.anthropic_api_key = anthropic_api_key
         self.google_api_key = google_api_key
+        self.google_model_name = google_model_name
 
         # Initialize clients
         self.openai_client = None
@@ -49,7 +51,7 @@ class LLMService:
         if google_api_key:
             try:
                 genai.configure(api_key=google_api_key)
-                self.google_client = genai.GenerativeModel('gemini-pro')
+                self.google_client = genai.GenerativeModel(self.google_model_name)
                 logger.info("Google Gemini client initialized")
             except Exception as e:
                 logger.warning("Failed to initialize Google Gemini client", error=str(e))
@@ -125,7 +127,7 @@ class LLMService:
 
         try:
             response = self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 temperature=temperature,
                 max_tokens=max_tokens,
                 messages=[

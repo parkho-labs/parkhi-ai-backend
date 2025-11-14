@@ -1,7 +1,11 @@
 from typing import List, Optional, Dict, Any
+import structlog
 from sqlalchemy.orm import Session
 
 from ..models.quiz_question import QuizQuestion
+
+logger = structlog.get_logger(__name__)
+
 
 class QuizRepository:
 
@@ -26,6 +30,7 @@ class QuizRepository:
         return quiz_question
 
     def create_questions_batch(self, questions: List[Dict[str, Any]]) -> List[QuizQuestion]:
+        logger.info("QuizRepository.create_questions_batch.start", question_count=len(questions))
         quiz_questions = []
         for q_data in questions:
             quiz_question = QuizQuestion(**q_data)
@@ -33,17 +38,32 @@ class QuizRepository:
             self.session.add(quiz_question)
 
         self.session.commit()
+        logger.info(
+            "QuizRepository.create_questions_batch.commit",
+            stored_count=len(quiz_questions),
+            job_ids=list({q.job_id for q in quiz_questions})
+        )
         for quiz_question in quiz_questions:
             self.session.refresh(quiz_question)
+        logger.info(
+            "QuizRepository.create_questions_batch.success",
+            question_ids=[q.question_id for q in quiz_questions]
+        )
         return quiz_questions
 
     def get_questions_by_job_id(self, job_id: int) -> List[QuizQuestion]:
-        return (
+        questions = (
             self.session.query(QuizQuestion)
             .filter(QuizQuestion.job_id == job_id)
             .order_by(QuizQuestion.question_id)
             .all()
         )
+        logger.info(
+            "QuizRepository.get_questions_by_job_id",
+            job_id=job_id,
+            question_count=len(questions)
+        )
+        return questions
 
     def get_question_by_id(self, job_id: int, question_id: str) -> Optional[QuizQuestion]:
         return (

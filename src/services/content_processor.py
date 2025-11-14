@@ -26,15 +26,33 @@ class ContentProcessorService:
             self.rag_service = None
 
     def process_content_background_sync(self, job_id: int):
-        def run_in_thread():
-            logger.info("Content processing thread started", job_id=job_id)
-            try:
-                asyncio.run(self.process_content_background(job_id))
-            except Exception as e:
-                logger.error("Content processing thread failed", job_id=job_id, error=str(e), exc_info=True)
+        # TEMP DEBUG: Run in main thread to see logs clearly
+        logger.info("=== CONTENT PROCESSOR START (MAIN THREAD DEBUG MODE) ===")
+        logger.info("Content processing started", job_id=job_id)
 
-        thread = threading.Thread(target=run_in_thread, daemon=True)
-        thread.start()
+        async def run_async():
+            try:
+                await self.process_content_background(job_id)
+                logger.info("=== CONTENT PROCESSOR COMPLETED SUCCESSFULLY ===")
+            except Exception as e:
+                logger.error("=== CONTENT PROCESSOR FAILED ===")
+                logger.error("Content processing failed", job_id=job_id, error=str(e), exc_info=True)
+                raise
+
+        # Run directly in main thread for debugging
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            logger.info(f"Found existing event loop, running task for job {job_id}")
+            # Run the coroutine and wait for completion
+            task = asyncio.ensure_future(run_async())
+            # This will block until the task completes
+            loop.run_until_complete(task)
+            logger.info(f"Task completed for job {job_id}")
+        except RuntimeError:
+            # If no event loop in current thread, create new one
+            logger.info(f"No event loop found, creating new one for job {job_id}")
+            asyncio.run(run_async())
 
     async def process_content_background(self, job_id: int):
         if job_id in self.running_jobs:

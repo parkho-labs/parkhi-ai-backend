@@ -1,3 +1,4 @@
+import logging
 import structlog
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
@@ -8,7 +9,50 @@ from .api.v1 import api_router
 from .config import get_settings
 from .core.database import create_tables
 
+
+class WebSocketAccessFilter(logging.Filter):
+    """
+    Filters uvicorn websocket access logs that include query params/tokens.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:  # type: ignore[override]
+        if record.levelno > logging.INFO:
+            return True
+
+        try:
+            message = record.getMessage()
+        except Exception:
+            message = str(record.msg)
+
+        if not message:
+            return True
+
+        if '"WebSocket ' in message and ('[accepted]' in message or message.strip().endswith("403")):
+            return False
+
+        return True
+
+
+def apply_logging_preferences(settings):
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.protocols.websockets").setLevel(logging.WARNING)
+    logging.getLogger("websockets").setLevel(logging.WARNING)
+
+    if settings.suppress_websocket_logs:
+        uvicorn_error_logger = logging.getLogger("uvicorn.error")
+        already_installed = any(isinstance(f, WebSocketAccessFilter) for f in uvicorn_error_logger.filters)
+        if not already_installed:
+            uvicorn_error_logger.addFilter(WebSocketAccessFilter())
+
+
 settings = get_settings()
+
+logging.basicConfig(
+    level=getattr(logging, settings.log_level.upper(), logging.INFO),
+    format="%(message)s"
+)
+
+apply_logging_preferences(settings)
 
 structlog.configure(
     processors=[
@@ -34,6 +78,7 @@ logger = structlog.get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    apply_logging_preferences(settings)
     logger.info("Starting AI Video Tutor API", version="0.1.0")
     try:
         create_tables()
@@ -109,6 +154,12 @@ app = create_application()
 
 if __name__ == "__main__":
     import uvicorn
+    import logging
+
+    # Disable websocket logs to prevent token exposure and reduce noise
+    logging.getLogger("uvicorn.protocols.websockets").setLevel(logging.WARNING)
+    logging.getLogger("websockets").setLevel(logging.WARNING)
+    logging.getLogger("fastapi").setLevel(logging.WARNING)
 
     uvicorn.run(
         "src.main:app",

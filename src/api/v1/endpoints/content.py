@@ -4,14 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFi
 
 from src.utils import job_utils
 
-from ...dependencies import get_content_job_repository, get_file_storage, get_current_user_optional, get_current_user_required, get_db
+from ...dependencies import get_content_job_repository, get_file_storage, get_current_user_optional, get_current_user_required, get_db, get_quiz_repository
 from ..schemas import (
     ContentProcessingRequest,
     FileProcessingResult,
     ContentJobResponse,
     ContentResults,
     ContentJobsListResponse,
-    SummaryResponse,
     ContentTextResponse,
     FileUploadResponse,
     JobStatus,
@@ -193,9 +192,7 @@ async def get_job_results(
             title=job.title,
             processing_duration_seconds=processing_duration,
             created_at=job.created_at,
-            completed_at=job.completed_at,
-            summary=job.summary,
-            content_text=job.content_text
+            completed_at=job.completed_at
         )
 
     except JobNotFoundError as e:
@@ -206,26 +203,6 @@ async def get_job_results(
         logger.error("Failed to get job results", job_id=job_id, error=str(e))
         raise HTTPException(status_code=500, detail="Failed to retrieve job results")
 
-
-@router.get("/{job_id}/summary", response_model=SummaryResponse)
-async def get_job_summary(
-    job_id: int,
-    repo = Depends(get_content_job_repository),
-    current_user: User = Depends(get_current_user_required)
-) -> SummaryResponse:
-    try:
-        job = job_utils.check_job_exists(job_id, repo)
-        if job.user_id != current_user.user_id:
-            raise HTTPException(status_code=404, detail="Job not found")
-        return SummaryResponse(summary=job.summary)
-
-    except JobNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Failed to get summary", job_id=job_id, error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to retrieve summary")
 
 
 @router.get("/{job_id}/content", response_model=ContentTextResponse)
@@ -328,15 +305,22 @@ async def get_supported_types():
 @router.get("/{job_id}/quiz", response_model=QuizResponse)
 async def get_job_quiz(
     job_id: int,
-    repo = Depends(get_content_job_repository)
+    repo = Depends(get_content_job_repository),
+    quiz_repo = Depends(get_quiz_repository)
 ) -> QuizResponse:
     try:
         job = job_utils.check_job_exists(job_id, repo)
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
 
-        questions = job.questions
-        if not questions:
+        quiz_questions_db = quiz_repo.get_questions_by_job_id(job_id)
+        if not quiz_questions_db:
+            logger.error(
+                "Quiz retrieval failed - no questions",
+                job_id=job_id,
+                job_status=job.status,
+                has_output_questions=bool(job.questions)
+            )
             raise HTTPException(
                 status_code=500,
                 detail="Content not found - quiz questions were not generated during processing"
@@ -345,32 +329,29 @@ async def get_job_quiz(
         quiz_questions = []
         total_score = 0
 
-        for q in questions:
-            if not isinstance(q, dict) or "question" not in q or "type" not in q:
-                logger.error(f"Invalid question format: {q}")
-                continue
-
+        for q in quiz_questions_db:
             try:
                 question_data = QuizQuestion(
-                    question_id=q.get("question_id", ""),
-                    question=q["question"],
-                    type=QuestionType(q["type"]),
-                    max_score=q.get("max_score", 1)
+                    question_id=q.question_id,
+                    question=q.question,
+                    type=QuestionType(q.type),
+                    max_score=q.max_score
                 )
 
-                if q["type"] == "multiple_choice" and "options" in q.get("answer_config", {}):
-                    question_data.options = q["answer_config"]["options"]
+                if q.type == "multiple_choice" and "options" in q.answer_config:
+                    question_data.options = q.answer_config["options"]
 
                 quiz_questions.append(question_data)
-                total_score += q.get("max_score", 1)
+                total_score += q.max_score
             except Exception as e:
-                logger.error(f"Error processing question {q}: {e}")
+                logger.error(f"Error processing question {q.question_id}: {e}")
                 continue
 
         return QuizResponse(
             questions=quiz_questions,
-            total_questions=len(questions),
-            total_score=total_score
+            total_questions=len(quiz_questions_db),
+            total_score=total_score,
+            summary=job.summary
         )
 
     except JobNotFoundError as e:
@@ -386,15 +367,16 @@ async def get_job_quiz(
 async def submit_job_quiz(
     job_id: int,
     submission: QuizSubmission,
-    repo = Depends(get_content_job_repository)
+    repo = Depends(get_content_job_repository),
+    quiz_repo = Depends(get_quiz_repository)
 ) -> QuizEvaluationResult:
     try:
         job = job_utils.check_job_exists(job_id, repo)
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
 
-        questions = job.questions
-        if not questions:
+        quiz_questions_db = quiz_repo.get_questions_by_job_id(job_id)
+        if not quiz_questions_db:
             raise HTTPException(
                 status_code=500,
                 detail="Content not found - quiz questions were not generated during processing"
@@ -404,11 +386,11 @@ async def submit_job_quiz(
         total_score = 0
         max_possible_score = 0
 
-        for q in questions:
-            question_id = q.get("question_id", "")
-            question_type = q.get("type", "")
-            answer_config = q.get("answer_config", {})
-            max_score = q.get("max_score", 1)
+        for q in quiz_questions_db:
+            question_id = q.question_id
+            question_type = q.type
+            answer_config = q.answer_config
+            max_score = q.max_score
             max_possible_score += max_score
 
             user_answer = submission.answers.get(question_id, "")

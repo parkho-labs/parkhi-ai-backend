@@ -26,21 +26,52 @@ class ContentWorkflow:
             self.rag_service = None
 
     async def process_content(self, job_id: int):
+        logger.info(f"=== CONTENT WORKFLOW START ===")
         logger.info("Starting content processing workflow", job_id=job_id)
 
         try:
+            logger.info(f"Step 1: Marking job {job_id} as started")
             await self.mark_job_started(job_id)
+
+            logger.info(f"Step 2: Validating and getting job {job_id}")
             job = await self.validate_and_get_job(job_id)
+            logger.info(
+                "Job configuration loaded",
+                job_id=job_id,
+                input_config=job.input_config_dict,
+                has_output_config=bool(job.output_config)
+            )
 
+            logger.info(f"Step 3: Parsing content sources for job {job_id}")
             combined_content, combined_title, source_metadata = await self.parse_all_content_sources(job)
+            logger.info(f"Content parsed - length: {len(combined_content)}, title: {combined_title}")
+            logger.info("Source metadata captured", job_id=job_id, source_metadata=source_metadata)
+
+            logger.info(f"Step 4: Retrieving RAG context for job {job_id}")
             rag_context = await self.retrieve_rag_context_if_needed(job, combined_title, combined_content)
+            logger.info(f"RAG context retrieved - length: {len(rag_context) if rag_context else 0}")
 
+            logger.info(f"Step 5: Generating summary for job {job_id}")
             summary = await self.generate_summary(job_id, combined_content, combined_title, rag_context)
-            questions_result = await self.run_question_generation(job_id, job, combined_content, combined_title, rag_context)
+            logger.info(f"Summary generated - length: {len(summary) if summary else 0}")
 
+            logger.info(f"Step 6: Running question generation for job {job_id}")
+            questions_result = await self.run_question_generation(job_id, job, combined_content, combined_title, rag_context)
+            logger.info(f"Question generation completed - result keys: {list(questions_result.keys()) if questions_result else 'None'}")
+
+            logger.info(f"Step 7: Finalizing job {job_id}")
+            logger.info(f"FINALIZE DEBUG - questions_result type: {type(questions_result)}")
+            logger.info(f"FINALIZE DEBUG - questions_result value: {questions_result}")
+            if questions_result:
+                logger.info(f"FINALIZE DEBUG - questions_result keys: {list(questions_result.keys())}")
+                if 'questions' in questions_result:
+                    logger.info(f"FINALIZE DEBUG - questions count: {len(questions_result.get('questions', []))}")
             await self.finalize_job(job_id, combined_content, combined_title, summary, questions_result)
+
+            logger.info(f"Step 8: Marking job {job_id} as completed")
             await self.mark_job_completed(job_id)
 
+            logger.info(f"=== CONTENT WORKFLOW COMPLETED SUCCESSFULLY ===")
             logger.info("Content processing workflow completed", job_id=job_id)
 
         except Exception as e:
@@ -67,10 +98,23 @@ class ContentWorkflow:
         await self.update_job_progress(job.id, 10.0, "Parsing content...")
 
         input_sources = job.input_config_dict.get("input_config", [])
+        logger.info(
+            "Parsing input sources",
+            job_id=job.id,
+            source_count=len(input_sources),
+            sources=input_sources
+        )
         parse_tasks = self.create_parse_tasks(input_sources, job.user_id)
         results = await asyncio.gather(*parse_tasks, return_exceptions=True)
 
         combined_content, combined_title, source_metadata = self.combine_parsed_results(results)
+        logger.info(
+            "Parse results combined",
+            job_id=job.id,
+            combined_content_length=len(combined_content),
+            combined_title=combined_title,
+            metadata_count=len(source_metadata)
+        )
         return combined_content, combined_title, source_metadata
 
     def create_parse_tasks(self, input_sources, user_id):
@@ -114,6 +158,14 @@ class ContentWorkflow:
                     'title': result.title,
                     'metadata': result.metadata
                 })
+                logger.info(
+                    "Content source parsed",
+                    index=i,
+                    source_type=source_type,
+                    title=result.title,
+                    content_length=len(result.content),
+                    metadata=result.metadata
+                )
             else:
                 logger.error(f"Content source {i} failed or returned no content. Result: {result}")
                 if result and hasattr(result, 'error'):
@@ -157,6 +209,12 @@ class ContentWorkflow:
             return ""
 
     async def run_question_generation(self, job_id, job, combined_content, combined_title, rag_context):
+        logger.info(f"=== CONTENT WORKFLOW - QUESTION GENERATION START ===")
+        logger.info(f"Job ID: {job_id}")
+        logger.info(f"Combined content length: {len(combined_content)}")
+        logger.info(f"Title: {combined_title}")
+        logger.info(f"RAG context length: {len(rag_context) if rag_context else 0}")
+
         await self.update_job_progress(job_id, 30.0, "Generating questions...")
 
         question_data = {
@@ -168,22 +226,80 @@ class ContentWorkflow:
             "num_questions": job.input_config_dict.get("num_questions", 10)
         }
 
-        return await self.question_generator.run(job_id, question_data)
+        logger.info(f"Question data keys: {list(question_data.keys())}")
+        logger.info(
+            "Question generation payload prepared",
+            job_id=job_id,
+            transcript_length=len(combined_content),
+            rag_context_length=len(rag_context) if rag_context else 0,
+            question_types=question_data["question_types"],
+            difficulty=question_data["difficulty_level"],
+            num_questions_requested=question_data["num_questions"]
+        )
+        logger.info(f"Calling question_generator.run with job_id={job_id}")
 
-    async def finalize_job(self, job_id: int, content_text: str, title: str, questions_result: Dict[str, Any]):
+        try:
+            result = await self.question_generator.run(job_id, question_data)
+            question_count = len(result.get("questions", [])) if result else 0
+            logger.info(
+                "Question generator returned",
+                job_id=job_id,
+                keys=list(result.keys()) if result else [],
+                question_count=question_count
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Question generation failed with error: {e}")
+            logger.error(f"Error type: {type(e)}")
+            raise
+
+    async def generate_summary(self, job_id: int, content: str, title: str, rag_context: str) -> str:
+        await self.update_job_progress(job_id, 25.0, "Generating summary...")
+
+        try:
+            summary_prompt = f"Summarize the following content in 2-3 paragraphs:\n\nTitle: {title}\nContent: {content[:5000]}"
+
+            from ..services.llm_service import LLMService, LLMProvider
+            from ..api.dependencies import get_llm_service
+
+            llm_service = get_llm_service()
+            summary = await llm_service.generate_with_fallback(
+                system_prompt="You are a helpful assistant that creates clear, concise summaries.",
+                user_prompt=summary_prompt,
+                temperature=0.3,
+                max_tokens=500,
+                preferred_provider=LLMProvider.OPENAI
+            )
+
+            return summary.strip()
+        except Exception as e:
+            logger.warning(f"Summary generation failed: {e}")
+            return f"Summary of {title}: This content covers topics related to the provided material."
+
+    async def finalize_job(self, job_id: int, content_text: str, title: str, summary: str, questions_result: Dict[str, Any]):
         db = SessionLocal()
         try:
             job = db.query(ContentJob).filter(ContentJob.id == job_id).first()
             if job:
                 job.title = title
+                questions_to_save = questions_result.get("questions", []) if questions_result else []
+
                 output_config = {
                     "content_text": content_text,
-                    "questions": questions_result.get("questions", []),
+                    "summary": summary,
+                    "questions": questions_to_save,
                     "metadata": {
-                        "question_generation": questions_result.get("metadata", {})
+                        "question_generation": questions_result.get("metadata", {}) if questions_result else {}
                     }
                 }
                 job.output_config_dict = output_config
+                logger.info(
+                    "Job output config updated",
+                    job_id=job_id,
+                    content_length=len(content_text),
+                    summary_length=len(summary) if summary else 0,
+                    question_count=len(output_config["questions"])
+                )
             db.commit()
         except Exception:
             db.rollback()

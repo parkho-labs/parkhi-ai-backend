@@ -132,8 +132,6 @@ class ContentJobResponse(ContentJobBase):
 class ContentResults(ContentJobBase):
     job_id: int
     processing_duration_seconds: Optional[int]
-    summary: Optional[str] = None
-    content_text: Optional[str] = None
 
 
 class FileUploadResponse(BaseModel):
@@ -187,12 +185,6 @@ class QuizQuestionResponse(BaseModel):
     max_score: int
 
 
-class QuizResponse(BaseModel):
-    questions: List[QuizQuestionResponse]
-    total_questions: int
-    max_score: int
-
-
 class QuizQuestion(BaseModel):
     question_id: str
     question: str
@@ -204,6 +196,7 @@ class QuizResponse(BaseModel):
     questions: List[QuizQuestion]
     total_questions: int
     total_score: int
+    summary: Optional[str] = None
 
 class QuizSubmission(BaseModel):
     answers: Dict[str, str]

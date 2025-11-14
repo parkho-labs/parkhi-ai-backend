@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     
     log_level: str = Field(default="INFO", description="Logging level")
     log_format: str = Field(default="json", description="Log format (json or text)")
+    suppress_websocket_logs: bool = Field(
+        default=True,
+        description="Suppress uvicorn's noisy websocket handshake/access logs"
+    )
     
     rate_limit_per_minute: int = Field(default=10, description="Rate limit per minute")
     rate_limit_per_hour: int = Field(default=100, description="Rate limit per hour")

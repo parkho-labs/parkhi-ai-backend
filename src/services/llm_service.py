@@ -222,7 +222,7 @@ class LLMService:
             return json.loads(response.strip())
         except json.JSONDecodeError:
             # Find first complete JSON object or array
-            for start_char, end_char in [('[', ']'), ('{', '}')]:
+            for start_char, end_char in [('{', '}'), ('[', ']')]:
                 start = response.find(start_char)
                 if start == -1:
                     continue

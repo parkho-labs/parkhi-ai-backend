@@ -36,28 +36,50 @@ class QuestionGeneratorAgent(ContentTutorAgent):
         return ContentSubject.GENERAL
 
     async def run(self, job_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
+        logger.info(f"=== QUESTION GENERATOR START ===")
+        logger.info(f"Job ID: {job_id}")
+        logger.info(f"Data keys: {list(data.keys())}")
+
         transcript = data.get("transcript")
         title = data.get("title", "")
         rag_context = data.get("rag_context", "")
 
+        logger.info(f"Transcript length: {len(transcript) if transcript else 0}")
+        logger.info(f"Title: {title}")
+        logger.info(f"RAG context length: {len(rag_context) if rag_context else 0}")
+
         if not transcript:
+            logger.error("No transcript available for question generation")
             raise ValueError("No transcript available for question generation")
 
         try:
             await self.update_job_progress(job_id, 80.0, "Detecting subject and generating questions")
 
             subject = self.determine_subject_type(f"{title} {transcript}")
+            logger.info(f"Detected subject: {subject}")
+
+            logger.info(f"=== CALLING PHYSICS TUTOR FOR {subject} ===")
+
+            # Create context for LLM
+            full_context = f"{rag_context}\n\n{transcript}" if rag_context else transcript
+            logger.info(f"Full context length: {len(full_context)}")
+
+            query = f"Generate quiz questions for: {title}"
+            logger.info(f"Query: {query}")
 
             match subject:
                 case ContentSubject.PHYSICS:
                     questions_data = await self.physics_tutor.generate_educational_questions(
-                        query=f"Generate quiz questions for: {title}",
-                        context=f"{rag_context}\n\n{transcript}",
+                        query=query,
+                        context=full_context,
                         job_id=job_id,
                         difficulty_level=data.get("difficulty_level", "intermediate"),
                         content_type=ContentSubject.PHYSICS
                     )
-                    questions = self.convert_physics_format_to_standard(questions_data.get("questions", []))
+                    raw_questions = questions_data.get("questions", [])
+                    logger.info(f"Physics LLM returned {len(raw_questions)} questions")
+                    questions = self.convert_physics_format_to_standard(raw_questions)
+                    logger.info(f"After conversion: {len(questions)} questions")
                 case ContentSubject.MATHEMATICS:
                     questions_data = await self.physics_tutor.generate_educational_questions(
                         query=f"Generate quiz questions for: {title}",
@@ -96,8 +118,15 @@ class QuestionGeneratorAgent(ContentTutorAgent):
                     questions = self.convert_physics_format_to_standard(questions_data.get("questions", []))
 
             await self.update_job_progress(job_id, 90.0, "Question generation completed")
+
+            logger.info(f"=== FINAL RESULTS ===")
+            logger.info(f"Total questions generated: {len(questions)}")
+            logger.info("Questions being saved", question_count=len(questions))
+
             await self.save_quiz_questions(job_id, questions)
             data["questions"] = questions
+
+            logger.info(f"=== QUESTION GENERATOR END - SUCCESS ===")
             return data
 
         except Exception as e:
@@ -185,10 +214,21 @@ class QuestionGeneratorAgent(ContentTutorAgent):
                 }
                 questions_data.append(question_data)
 
+            logger.info(
+                "Saving quiz questions",
+                job_id=job_id,
+                question_count=len(questions_data)
+            )
+            if not questions_data:
+                logger.warning("No questions to save", job_id=job_id)
+                return
+
             quiz_repo.create_questions_batch(questions_data)
+            logger.info("Quiz questions saved", job_id=job_id, question_ids=[q["question_id"] for q in questions_data])
 
         except Exception:
             db.rollback()
+            logger.error("Failed to save quiz questions", job_id=job_id, exc_info=True)
             raise
         finally:
             db.close()

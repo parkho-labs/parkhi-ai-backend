@@ -108,6 +108,11 @@ class PhysicsTutorAgent(ContentTutorAgent):
                 await self.update_job_progress(job_id, 50.0, "Processing with LLM")
 
             system_message = PhysicsTeacherPrompts.get_system_message()
+            # Truncate context if too long to prevent token limit issues
+            if len(context) > 10000:
+                context = context[:10000] + "\n[Content truncated...]"
+                logger.warning(f"Context truncated to prevent token limit, original length: {len(context)}")
+
             llm_response = await self.llm_service.generate_with_fallback(
                 system_prompt=system_message,
                 user_prompt=prompt,
@@ -116,11 +121,20 @@ class PhysicsTutorAgent(ContentTutorAgent):
                 preferred_provider=LLMProvider.OPENAI
             )
 
+            logger.info("LLM response received", response_length=len(llm_response))
+
             if job_id:
                 await self.update_job_progress(job_id, 80.0, "Parsing LLM response")
 
             questions_data = await self.llm_service.parse_json_response(llm_response)
+            parsed_count = len(questions_data.get("questions", [])) if isinstance(questions_data, dict) else 0
+            logger.info("Parsed LLM response", questions_count=parsed_count)
+
             validated_data = self._validate_questions_response(questions_data)
+            logger.info(
+                "Validated question payload",
+                valid_questions=len(validated_data.get("questions", [])) if isinstance(validated_data, dict) else 0
+            )
 
             return validated_data
 

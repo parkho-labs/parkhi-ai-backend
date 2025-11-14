@@ -1,19 +1,68 @@
 import structlog
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException
 from typing import Optional
 
 from ....core.websocket_manager import websocket_manager
+from ....core.firebase import verify_firebase_token
+from ....core.database import SessionLocal
+from ....models.user import User
+from ....config import get_settings
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
+settings = get_settings()
 
 
-@router.websocket("/ws/user/{user_id}")
+async def authenticate_websocket_user(token: str) -> Optional[User]:
+    if not token:
+        if settings.demo_mode:
+            db = SessionLocal()
+            try:
+                demo_user = db.query(User).filter(User.user_id == settings.demo_user_id).first()
+                return demo_user
+            finally:
+                db.close()
+        return None
+
+    try:
+        firebase_data = verify_firebase_token(token)
+        if not firebase_data:
+            return None
+
+        firebase_uid = firebase_data.get("uid")
+        if not firebase_uid:
+            return None
+
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.firebase_uid == firebase_uid).first()
+            return user
+        finally:
+            db.close()
+
+    except Exception as e:
+        logger.error("WebSocket authentication failed", error=str(e))
+        return None
+
+
+@router.websocket("/ws/user")
 async def websocket_user_endpoint(
     websocket: WebSocket,
-    user_id: str,
+    token: Optional[str] = Query(None),
     job_id: Optional[int] = Query(None)
 ):
+    await websocket.accept()
+
+    user = await authenticate_websocket_user(token)
+    if not user:
+        await websocket.send_json({
+            "type": "error",
+            "message": "Authentication required. Please provide a valid Firebase token."
+        })
+        await websocket.close()
+        return
+
+    user_id = user.user_id
     await websocket_manager.connect_user(websocket, user_id)
 
     if job_id:
@@ -70,10 +119,39 @@ async def websocket_user_endpoint(
 
 
 @router.websocket("/ws/jobs/{job_id}")
-async def websocket_job_endpoint(websocket: WebSocket, job_id: int):
+async def websocket_job_endpoint(
+    websocket: WebSocket,
+    job_id: int,
+    token: Optional[str] = Query(None)
+):
+    await websocket.accept()
 
-    user_id = f"user_{job_id}" 
+    user = await authenticate_websocket_user(token)
+    if not user:
+        await websocket.send_json({
+            "type": "error",
+            "message": "Authentication required. Please provide a valid Firebase token."
+        })
+        await websocket.close()
+        return
 
+    db = SessionLocal()
+    try:
+        from ....repositories.content_job_repository import ContentJobRepository
+        job_repo = ContentJobRepository(db)
+        job = job_repo.get(job_id)
+
+        if not job or job.user_id != user.user_id:
+            await websocket.send_json({
+                "type": "error",
+                "message": "Job not found or access denied."
+            })
+            await websocket.close()
+            return
+    finally:
+        db.close()
+
+    user_id = user.user_id
     await websocket_manager.connect_user(websocket, user_id)
     await websocket_manager.subscribe_to_job(websocket, job_id, user_id)
 

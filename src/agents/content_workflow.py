@@ -3,7 +3,6 @@ from datetime import datetime
 import asyncio
 import structlog
 
-from .content_analyzer import ContentAnalyzerAgent
 from .question_generator import QuestionGeneratorAgent
 from ..models.content_job import ContentJob
 from ..core.database import SessionLocal
@@ -18,7 +17,6 @@ logger = structlog.get_logger(__name__)
 
 class ContentWorkflow:
     def __init__(self):
-        self.content_analyzer = ContentAnalyzerAgent()
         self.question_generator = QuestionGeneratorAgent()
         self.parser_factory = ContentParserFactory()
         try:
@@ -28,21 +26,52 @@ class ContentWorkflow:
             self.rag_service = None
 
     async def process_content(self, job_id: int):
+        logger.info(f"=== CONTENT WORKFLOW START ===")
         logger.info("Starting content processing workflow", job_id=job_id)
 
         try:
+            logger.info(f"Step 1: Marking job {job_id} as started")
             await self.mark_job_started(job_id)
+
+            logger.info(f"Step 2: Validating and getting job {job_id}")
             job = await self.validate_and_get_job(job_id)
+            logger.info(
+                "Job configuration loaded",
+                job_id=job_id,
+                input_config=job.input_config_dict,
+                has_output_config=bool(job.output_config)
+            )
 
-            combined_content, combined_title = await self.parse_all_content_sources(job)
+            logger.info(f"Step 3: Parsing content sources for job {job_id}")
+            combined_content, combined_title, source_metadata = await self.parse_all_content_sources(job)
+            logger.info(f"Content parsed - length: {len(combined_content)}, title: {combined_title}")
+            logger.info("Source metadata captured", job_id=job_id, source_metadata=source_metadata)
+
+            logger.info(f"Step 4: Retrieving RAG context for job {job_id}")
             rag_context = await self.retrieve_rag_context_if_needed(job, combined_title, combined_content)
+            logger.info(f"RAG context retrieved - length: {len(rag_context) if rag_context else 0}")
 
-            analysis_result = await self.run_content_analysis(job_id, job, combined_content, combined_title, rag_context)
-            questions_result = await self.run_question_generation(job_id, analysis_result)
+            logger.info(f"Step 5: Generating summary for job {job_id}")
+            summary = await self.generate_summary(job_id, combined_content, combined_title, rag_context)
+            logger.info(f"Summary generated - length: {len(summary) if summary else 0}")
 
-            await self.finalize_job(job_id, combined_content, combined_title, analysis_result, questions_result)
+            logger.info(f"Step 6: Running question generation for job {job_id}")
+            questions_result = await self.run_question_generation(job_id, job, combined_content, combined_title, rag_context)
+            logger.info(f"Question generation completed - result keys: {list(questions_result.keys()) if questions_result else 'None'}")
+
+            logger.info(f"Step 7: Finalizing job {job_id}")
+            logger.info(f"FINALIZE DEBUG - questions_result type: {type(questions_result)}")
+            logger.info(f"FINALIZE DEBUG - questions_result value: {questions_result}")
+            if questions_result:
+                logger.info(f"FINALIZE DEBUG - questions_result keys: {list(questions_result.keys())}")
+                if 'questions' in questions_result:
+                    logger.info(f"FINALIZE DEBUG - questions count: {len(questions_result.get('questions', []))}")
+            await self.finalize_job(job_id, combined_content, combined_title, summary, questions_result)
+
+            logger.info(f"Step 8: Marking job {job_id} as completed")
             await self.mark_job_completed(job_id)
 
+            logger.info(f"=== CONTENT WORKFLOW COMPLETED SUCCESSFULLY ===")
             logger.info("Content processing workflow completed", job_id=job_id)
 
         except Exception as e:
@@ -69,27 +98,42 @@ class ContentWorkflow:
         await self.update_job_progress(job.id, 10.0, "Parsing content...")
 
         input_sources = job.input_config_dict.get("input_config", [])
-        parse_tasks = self.create_parse_tasks(input_sources)
+        logger.info(
+            "Parsing input sources",
+            job_id=job.id,
+            source_count=len(input_sources),
+            sources=input_sources
+        )
+        parse_tasks = self.create_parse_tasks(input_sources, job.user_id)
         results = await asyncio.gather(*parse_tasks, return_exceptions=True)
 
-        return self.combine_parsed_results(results)
+        combined_content, combined_title, source_metadata = self.combine_parsed_results(results)
+        logger.info(
+            "Parse results combined",
+            job_id=job.id,
+            combined_content_length=len(combined_content),
+            combined_title=combined_title,
+            metadata_count=len(source_metadata)
+        )
+        return combined_content, combined_title, source_metadata
 
-    def create_parse_tasks(self, input_sources):
+    def create_parse_tasks(self, input_sources, user_id):
         parse_tasks = []
         for source in input_sources:
             content_type = source.get("content_type")
             source_id = source.get("id")
 
             if content_type in ["pdf", "docx"]:
-                parse_tasks.append(self._parse_file(content_type, source_id))
+                parse_tasks.append(self._parse_file(content_type, source_id, user_id))
             else:
-                parse_tasks.append(self._parse_url(content_type, source_id))
+                parse_tasks.append(self._parse_url(content_type, source_id, user_id))
 
         return parse_tasks
 
     def combine_parsed_results(self, results):
         all_content = []
         all_titles = []
+        source_metadata = []
 
         for i, result in enumerate(results):
             if isinstance(result, Exception):
@@ -97,9 +141,31 @@ class ContentWorkflow:
                 continue
 
             if result and result.success:
-                all_content.append(result.content)
+                source_type = result.metadata.get('source_type', 'unknown')
+
+                if source_type == 'collection':
+                    content_with_source = f"=== COLLECTION: {result.title} ===\n{result.content}"
+                else:
+                    content_with_source = f"=== SOURCE: {result.title or f'Document {i+1}'} ===\n{result.content}"
+
+                all_content.append(content_with_source)
                 if result.title:
                     all_titles.append(result.title)
+
+                source_metadata.append({
+                    'index': i,
+                    'type': source_type,
+                    'title': result.title,
+                    'metadata': result.metadata
+                })
+                logger.info(
+                    "Content source parsed",
+                    index=i,
+                    source_type=source_type,
+                    title=result.title,
+                    content_length=len(result.content),
+                    metadata=result.metadata
+                )
             else:
                 logger.error(f"Content source {i} failed or returned no content. Result: {result}")
                 if result and hasattr(result, 'error'):
@@ -108,10 +174,10 @@ class ContentWorkflow:
         if not all_content:
             raise ValueError("No content could be extracted from provided sources")
 
-        combined_content = "\n\n--- NEXT DOCUMENT ---\n\n".join(all_content)
+        combined_content = "\n\n".join(all_content)
         combined_title = " & ".join(all_titles) if all_titles else "Processed Content"
 
-        return combined_content, combined_title
+        return combined_content, combined_title, source_metadata
 
     async def retrieve_rag_context_if_needed(self, job, combined_title, combined_content):
         if not job.collection_name:
@@ -127,7 +193,8 @@ class ContentWorkflow:
             context_query = combined_title or combined_content[:200]
             rag_context = await self.rag_service.get_collection_context(
                 job.collection_name,
-                context_query
+                context_query,
+                job.user_id
             )
 
             if rag_context:
@@ -141,38 +208,98 @@ class ContentWorkflow:
             logger.warning("Failed to retrieve RAG context", job_id=job.id, error=str(e))
             return ""
 
-    async def run_content_analysis(self, job_id, job, combined_content, combined_title, rag_context):
-        await self.update_job_progress(job_id, 30.0, "Analyzing content...")
+    async def run_question_generation(self, job_id, job, combined_content, combined_title, rag_context):
+        logger.info(f"=== CONTENT WORKFLOW - QUESTION GENERATION START ===")
+        logger.info(f"Job ID: {job_id}")
+        logger.info(f"Combined content length: {len(combined_content)}")
+        logger.info(f"Title: {combined_title}")
+        logger.info(f"RAG context length: {len(rag_context) if rag_context else 0}")
 
-        analysis_data = {
+        await self.update_job_progress(job_id, 30.0, "Generating questions...")
+
+        question_data = {
             "transcript": combined_content,
-            "video_metadata": {"title": combined_title},
+            "title": combined_title,
             "rag_context": rag_context,
-            **job.input_config_dict
+            "question_types": job.input_config_dict.get("question_types", ["multiple_choice", "true_false"]),
+            "difficulty_level": job.input_config_dict.get("difficulty_level", "intermediate"),
+            "num_questions": job.input_config_dict.get("num_questions", 10)
         }
 
-        return await self.content_analyzer.run(job_id, analysis_data)
+        logger.info(f"Question data keys: {list(question_data.keys())}")
+        logger.info(
+            "Question generation payload prepared",
+            job_id=job_id,
+            transcript_length=len(combined_content),
+            rag_context_length=len(rag_context) if rag_context else 0,
+            question_types=question_data["question_types"],
+            difficulty=question_data["difficulty_level"],
+            num_questions_requested=question_data["num_questions"]
+        )
+        logger.info(f"Calling question_generator.run with job_id={job_id}")
 
-    async def run_question_generation(self, job_id, analysis_result):
-        await self.update_job_progress(job_id, 70.0, "Generating questions...")
-        return await self.question_generator.run(job_id, analysis_result)
+        try:
+            result = await self.question_generator.run(job_id, question_data)
+            question_count = len(result.get("questions", [])) if result else 0
+            logger.info(
+                "Question generator returned",
+                job_id=job_id,
+                keys=list(result.keys()) if result else [],
+                question_count=question_count
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Question generation failed with error: {e}")
+            logger.error(f"Error type: {type(e)}")
+            raise
 
-    async def finalize_job(self, job_id: int, content_text: str, title: str, analysis_result: Dict[str, Any], questions_result: Dict[str, Any]):
+    async def generate_summary(self, job_id: int, content: str, title: str, rag_context: str) -> str:
+        await self.update_job_progress(job_id, 25.0, "Generating summary...")
+
+        try:
+            summary_prompt = f"Summarize the following content in 2-3 paragraphs:\n\nTitle: {title}\nContent: {content[:5000]}"
+
+            from ..services.llm_service import LLMService, LLMProvider
+            from ..api.dependencies import get_llm_service
+
+            llm_service = get_llm_service()
+            summary = await llm_service.generate_with_fallback(
+                system_prompt="You are a helpful assistant that creates clear, concise summaries.",
+                user_prompt=summary_prompt,
+                temperature=0.3,
+                max_tokens=500,
+                preferred_provider=LLMProvider.OPENAI
+            )
+
+            return summary.strip()
+        except Exception as e:
+            logger.warning(f"Summary generation failed: {e}")
+            return f"Summary of {title}: This content covers topics related to the provided material."
+
+    async def finalize_job(self, job_id: int, content_text: str, title: str, summary: str, questions_result: Dict[str, Any]):
         db = SessionLocal()
         try:
             job = db.query(ContentJob).filter(ContentJob.id == job_id).first()
             if job:
                 job.title = title
+                questions_to_save = questions_result.get("questions", []) if questions_result else []
+
                 output_config = {
                     "content_text": content_text,
-                    "summary": analysis_result.get("summary"),
-                    "questions": questions_result.get("questions", []),
+                    "summary": summary,
+                    "questions": questions_to_save,
                     "metadata": {
-                        "analysis": analysis_result.get("metadata", {}),
-                        "question_generation": questions_result.get("metadata", {})
+                        "question_generation": questions_result.get("metadata", {}) if questions_result else {}
                     }
                 }
                 job.output_config_dict = output_config
+                logger.info(
+                    "Job output config updated",
+                    job_id=job_id,
+                    content_length=len(content_text),
+                    summary_length=len(summary) if summary else 0,
+                    question_count=len(output_config["questions"])
+                )
             db.commit()
         except Exception:
             db.rollback()
@@ -281,13 +408,13 @@ class ContentWorkflow:
         finally:
             db.close()
 
-    async def _parse_url(self, content_type: str, url: str):
+    async def _parse_url(self, content_type: str, url: str, user_id: str):
         parser = self.parser_factory.get_parser(content_type)
         if not parser:
             raise ValueError(f"No parser available for content type: {content_type}")
-        return await parser.parse(url)
+        return await parser.parse(url, user_id=user_id)
 
-    async def _parse_file(self, content_type: str, file_id: str):
+    async def _parse_file(self, content_type: str, file_id: str, user_id: str):
         db = SessionLocal()
         try:
             file_repo = FileRepository(db)
@@ -301,6 +428,6 @@ class ContentWorkflow:
             if not parser:
                 raise ValueError(f"No parser available for content type: {content_type}")
 
-            return await parser.parse(file_path)
+            return await parser.parse(file_path, user_id=user_id)
         finally:
             db.close()

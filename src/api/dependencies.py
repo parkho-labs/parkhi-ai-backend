@@ -1,7 +1,7 @@
 from typing import Optional
 import logging
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi import Depends, Request
+from fastapi import Depends, Request, HTTPException
 from sqlalchemy.orm import Session
 
 from ..core.database import get_db
@@ -13,7 +13,9 @@ from ..repositories.analytics_repository import AnalyticsRepository
 from ..services.file_storage import FileStorageService
 from ..services.analytics_service import AnalyticsService
 from ..services.analytics_dashboard_service import get_analytics_dashboard_service, AnalyticsDashboardService
+from ..services.llm_service import LLMService
 from ..models.user import User
+from ..config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -49,78 +51,89 @@ def get_analytics_dashboard_service_dep() -> AnalyticsDashboardService:
     return get_analytics_dashboard_service()
 
 
+def get_llm_service() -> LLMService:
+    settings = get_settings()
+    return LLMService(
+        openai_api_key=settings.openai_api_key,
+        anthropic_api_key=settings.anthropic_api_key,
+        google_api_key=settings.google_api_key,
+        google_model_name=settings.google_model_name
+    )
+
+
+async def get_current_user_required(
+    request: Request,
+    db: Session = Depends(get_db),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> User:
+    settings = get_settings()
+
+    user = await get_current_user_optional(request, db, credentials)
+
+    if not user and settings.demo_mode:
+        demo_user = await get_or_create_demo_user(db, settings.demo_user_id)
+        return demo_user
+
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required. Please provide a valid Firebase token."
+        )
+    return user
+
+
+async def get_or_create_demo_user(db: Session, demo_user_id: str) -> User:
+    from ..models.user import User
+
+    existing_user = db.query(User).filter(User.user_id == demo_user_id).first()
+    if existing_user:
+        return existing_user
+
+    demo_user = User(
+        user_id=demo_user_id,
+        firebase_uid=f"demo-{demo_user_id}",
+        email="demo@example.com",
+        full_name="Demo User"
+    )
+    db.add(demo_user)
+    db.commit()
+    db.refresh(demo_user)
+    return demo_user
+
+
 async def get_current_user_optional(
     request: Request,
     db: Session = Depends(get_db),
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> Optional[User]:
-    """
-    Get current authenticated user from Firebase token.
-
-    This function:
-    1. Extracts Firebase token from Authorization header
-    2. Verifies token with Firebase
-    3. Auto-creates user if valid token but user doesn't exist (with RAG registration)
-    4. Returns User object or None
-
-    Args:
-        request: FastAPI request object
-        db: Database session
-        credentials: HTTP Bearer credentials (optional)
-
-    Returns:
-        User object if authenticated, None otherwise
-    """
     try:
-        # Check for Authorization header
         if not credentials or not credentials.credentials:
             return None
 
-        token = credentials.credentials
-
-        # Verify Firebase token
-        firebase_data = verify_firebase_token(token)
+        firebase_data = verify_firebase_token(credentials.credentials)
         if not firebase_data:
-            logger.debug("Invalid Firebase token provided")
             return None
 
-        # Extract user data from Firebase token
         firebase_uid = firebase_data.get("uid")
         email = firebase_data.get("email")
         name = firebase_data.get("name", firebase_data.get("email", "Unknown User"))
 
         if not firebase_uid or not email:
-            logger.warning(f"Firebase token missing required fields: uid={firebase_uid}, email={email}")
             return None
 
-        # Auto-create user if they don't exist (includes RAG registration)
         try:
-            user = await get_or_create_user(
+            return await get_or_create_user(
                 db=db,
                 firebase_uid=firebase_uid,
                 email=email,
                 full_name=name,
-                date_of_birth=None  # Optional field, can be updated later
+                date_of_birth=None
             )
-
-            logger.debug(f"Successfully authenticated user: {user.email}")
-            return user
-
-        except Exception as e:
-            # Log RAG/creation errors but don't break authentication flow
-            logger.error(f"Failed to create/retrieve user {firebase_uid}: {e}")
-
-            # Try to fetch existing user without creation (fallback)
+        except Exception:
             existing_user = db.query(User).filter(User.firebase_uid == firebase_uid).first()
-            if existing_user:
-                logger.info(f"Returning existing user {existing_user.email} despite creation error")
-                return existing_user
+            return existing_user
 
-            logger.error(f"Cannot authenticate user {firebase_uid} - creation failed and user doesn't exist")
-            return None
-
-    except Exception as e:
-        logger.error(f"Authentication error: {e}")
+    except Exception:
         return None
 
 

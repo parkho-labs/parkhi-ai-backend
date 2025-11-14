@@ -31,6 +31,7 @@ class PDFParser(BaseContentParser):
             if not content.strip():
                 return ContentParseResult("", error="No text content found in PDF")
 
+            metadata["source_type"] = "pdf"
             return ContentParseResult(
                 content=content.strip(),
                 title=metadata.get("title"),

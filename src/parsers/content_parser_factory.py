@@ -4,6 +4,7 @@ from .pdf_parser import PDFParser
 from .docx_parser import DOCXParser
 from .web_parser import WebParser
 from .youtube_parser import YouTubeParser
+from .collection_parser import CollectionParser
 
 
 class ContentParserFactory:
@@ -12,7 +13,8 @@ class ContentParserFactory:
             "pdf": PDFParser(),
             "docx": DOCXParser(),
             "web_url": WebParser(),
-            "youtube": YouTubeParser()
+            "youtube": YouTubeParser(),
+            "collection": CollectionParser()
         }
 
     def get_parser(self, input_type: str) -> Optional[BaseContentParser]:

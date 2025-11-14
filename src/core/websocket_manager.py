@@ -16,7 +16,7 @@ class WebSocketManager:
         self._job_connection_state: Dict[int, bool] = {}
 
     async def connect_user(self, websocket: WebSocket, user_id: str) -> None:
-        await websocket.accept()
+        # WebSocket already accepted in the endpoint, don't accept again
         if user_id not in self._user_connections:
             self._user_connections[user_id] = []
 

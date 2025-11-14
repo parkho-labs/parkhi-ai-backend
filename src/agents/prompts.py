@@ -47,11 +47,13 @@ class QuestionGenerationPrompts:
         return f"""Generate {num_questions} multiple-choice questions based on the content. Each question should be {difficulty_level} level and have:
 
 - question: the question text
-- answer_config: object with options array, correct_answer, and reason
+- answer_config: object with options (A,B,C,D format), correct_answer (A/B/C/D), and reason
 - context: relevant excerpt from content
 - max_score: 1
 
-Requirements:
+IMPORTANT FORMAT REQUIREMENTS:
+- options must be object with keys A, B, C, D: {{"A": "text", "B": "text", "C": "text", "D": "text"}}
+- correct_answer must be letter only: "A", "B", "C", or "D"
 - Options should be plausible but only one correct
 - Avoid "all of the above" or "none of the above" options
 - Include brief explanation for correct answer
@@ -65,11 +67,12 @@ Return valid JSON array only."""
         return f"""Generate {num_questions} true/false questions based on the content. Each question should be {difficulty_level} level and have:
 
 - question: the statement to evaluate
-- answer_config: object with correct_answer (true/false) and reason
+- answer_config: object with correct_answer ("true"/"false" as string) and reason
 - context: relevant excerpt from content
 - max_score: 1
 
-Requirements:
+IMPORTANT FORMAT REQUIREMENTS:
+- correct_answer must be string "true" or "false" only
 - Statements should be clear and unambiguous
 - Avoid trick questions or overly obvious answers
 - Include brief explanation for the correct answer
@@ -235,6 +238,147 @@ JEE Advanced Requirements:
 - Focus on real-world applications and limiting cases
 - Ensure questions require analytical thinking
 - Include cross-topic connections when applicable"""
+
+    @staticmethod
+    def get_mathematics_template(context: str, query: str, difficulty_level: str = "intermediate") -> str:
+        return f"""You are an experienced mathematics teacher creating educational content. Generate structured mathematics questions in valid JSON format.
+
+Mathematics Content:
+{context}
+
+Student Request: {query}
+Difficulty Level: {difficulty_level}
+
+Respond with valid JSON only:
+{{
+    "questions": [
+        {{
+            "question_text": "Complete mathematics question text here",
+            "options": ["Option A text", "Option B text", "Option C text", "Option D text"],
+            "correct_answer": "Option B text",
+            "explanation": "Detailed mathematical explanation why this is correct",
+            "requires_diagram": true,
+            "contains_math": true,
+            "diagram_type": "graph",
+            "source_reference": "Mathematics Topic"
+        }}
+    ]
+}}
+
+Important:
+- Generate exactly the number of questions requested
+- For diagram_type use: "graph", "geometric_shape", "equation", "chart", or null
+- Set requires_diagram to true only if visual representation is essential
+- Set contains_math to true for equations/formulas
+- Include step-by-step solutions in explanations
+- Focus on mathematical reasoning and problem-solving
+- Ensure JSON is valid and complete"""
+
+    @staticmethod
+    def get_chemistry_template(context: str, query: str, difficulty_level: str = "intermediate") -> str:
+        return f"""You are an experienced chemistry teacher creating educational content. Generate structured chemistry questions in valid JSON format.
+
+Chemistry Content:
+{context}
+
+Student Request: {query}
+Difficulty Level: {difficulty_level}
+
+Respond with valid JSON only:
+{{
+    "questions": [
+        {{
+            "question_text": "Complete chemistry question text here",
+            "options": ["Option A text", "Option B text", "Option C text", "Option D text"],
+            "correct_answer": "Option B text",
+            "explanation": "Detailed chemical explanation why this is correct",
+            "requires_diagram": true,
+            "contains_math": true,
+            "diagram_type": "molecular_structure",
+            "source_reference": "Chemistry Topic"
+        }}
+    ]
+}}
+
+Important:
+- Generate exactly the number of questions requested
+- For diagram_type use: "molecular_structure", "reaction_mechanism", "periodic_table", "apparatus", or null
+- Set requires_diagram to true only if molecular or experimental visualization is essential
+- Set contains_math to true for chemical equations/calculations
+- Include balanced equations and mechanism explanations
+- Focus on chemical principles and reactions
+- Ensure JSON is valid and complete"""
+
+    @staticmethod
+    def get_biology_template(context: str, query: str, difficulty_level: str = "intermediate") -> str:
+        return f"""You are an experienced biology teacher creating educational content. Generate structured biology questions in valid JSON format.
+
+Biology Content:
+{context}
+
+Student Request: {query}
+Difficulty Level: {difficulty_level}
+
+Respond with valid JSON only:
+{{
+    "questions": [
+        {{
+            "question_text": "Complete biology question text here",
+            "options": ["Option A text", "Option B text", "Option C text", "Option D text"],
+            "correct_answer": "Option B text",
+            "explanation": "Detailed biological explanation why this is correct",
+            "requires_diagram": true,
+            "contains_math": false,
+            "diagram_type": "cell_structure",
+            "source_reference": "Biology Topic"
+        }}
+    ]
+}}
+
+Important:
+- Generate exactly the number of questions requested
+- For diagram_type use: "cell_structure", "organ_system", "ecosystem", "dna_structure", "process_flow", or null
+- Set requires_diagram to true only if biological structure visualization is essential
+- Set contains_math to false unless calculations are involved
+- Include biological processes and mechanism explanations
+- Focus on life science concepts and functions
+- Ensure JSON is valid and complete"""
+
+    @staticmethod
+    def get_general_template(context: str, query: str, difficulty_level: str = "intermediate") -> str:
+        return f"""You are an experienced educator creating educational content. Generate structured educational questions in valid JSON format.
+
+Educational Content:
+{context}
+
+Student Request: {query}
+Difficulty Level: {difficulty_level}
+
+Respond with valid JSON only:
+{{
+    "questions": [
+        {{
+            "question_text": "Complete educational question text here",
+            "options": ["Option A text", "Option B text", "Option C text", "Option D text"],
+            "correct_answer": "Option B text",
+            "explanation": "Detailed explanation why this is correct",
+            "requires_diagram": false,
+            "contains_math": false,
+            "diagram_type": null,
+            "source_reference": "Educational Content"
+        }}
+    ]
+}}
+
+Important:
+- Generate exactly the number of questions requested
+- Adapt question style to the content subject matter
+- Set requires_diagram based on whether visual aids would help
+- Set contains_math based on whether numerical calculations are involved
+- Include clear explanations that aid learning
+- Focus on comprehension and application of concepts
+- Make questions appropriate for the specified difficulty level
+- Ensure JSON is valid and complete"""
 
 
 class SystemPrompts:

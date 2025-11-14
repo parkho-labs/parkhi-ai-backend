@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     
     log_level: str = Field(default="INFO", description="Logging level")
     log_format: str = Field(default="json", description="Log format (json or text)")
+    suppress_websocket_logs: bool = Field(
+        default=True,
+        description="Suppress uvicorn's noisy websocket handshake/access logs"
+    )
     
     rate_limit_per_minute: int = Field(default=10, description="Rate limit per minute")
     rate_limit_per_hour: int = Field(default=100, description="Rate limit per hour")
@@ -94,8 +98,13 @@ class Settings(BaseSettings):
 
     # LLM Question Generation
     question_generation_temperature: float = Field(default=0.7, description="LLM temperature for question generation")
-    question_generation_max_tokens: int = Field(default=10000, description="Max tokens for question generation")
+    question_generation_max_tokens: int = Field(default=4000, description="Max tokens for question generation")
     preferred_question_provider: str = Field(default="openai", description="Preferred LLM provider for questions")
+    google_model_name: str = Field(default="gemini-1.5-flash-latest", description="Google Gemini model name")
+
+    # Demo Mode Configuration
+    demo_mode: bool = Field(default=False, description="Enable demo mode for development")
+    demo_user_id: str = Field(default="demo-user-123", description="Default demo user ID")
 
     class Config:
         env_file = [".env.local", ".env"]

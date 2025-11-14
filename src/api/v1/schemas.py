@@ -69,6 +69,14 @@ class InputType(str, Enum):
     COLLECTION = "collection"
 
 
+class ContentSubject(str, Enum):
+    PHYSICS = "physics"
+    MATHEMATICS = "mathematics"
+    CHEMISTRY = "chemistry"
+    BIOLOGY = "biology"
+    GENERAL = "general"
+
+
 class ContentInput(BaseModel):
     content_type: InputType
     id: str
@@ -124,9 +132,6 @@ class ContentJobResponse(ContentJobBase):
 class ContentResults(ContentJobBase):
     job_id: int
     processing_duration_seconds: Optional[int]
-    summary: Optional[str] = None
-    questions: Optional[List[dict]] = None
-    content_text: Optional[str] = None
 
 
 class FileUploadResponse(BaseModel):
@@ -180,11 +185,31 @@ class QuizQuestionResponse(BaseModel):
     max_score: int
 
 
-class QuizResponse(BaseModel):
-    questions: List[QuizQuestionResponse]
-    total_questions: int
-    max_score: int
+class QuizQuestion(BaseModel):
+    question_id: str
+    question: str
+    type: QuestionType
+    options: Optional[Dict[str, str]] = None
+    max_score: int = 1
 
+class QuizResponse(BaseModel):
+    questions: List[QuizQuestion]
+    total_questions: int
+    total_score: int
+    summary: Optional[str] = None
 
 class QuizSubmission(BaseModel):
     answers: Dict[str, str]
+
+class QuizResult(BaseModel):
+    question_id: str
+    user_answer: str
+    correct_answer: str
+    is_correct: bool
+    score: int
+
+class QuizEvaluationResult(BaseModel):
+    total_score: int
+    max_possible_score: int
+    percentage: float
+    results: List[QuizResult]
